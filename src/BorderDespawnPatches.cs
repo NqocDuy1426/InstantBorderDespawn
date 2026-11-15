@@ -12,40 +12,45 @@ namespace InstantBorderDespawn
         {
             if (harmony == null) return;
 
-            // 1. TrainAI.SimulationStep
+            // 1. TrainAI.SimulationStep (Touch border edge trigger: <= 35m)
             Patch(harmony, typeof(TrainAI), "SimulationStep",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(TrainAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 2. CargoTrainAI.ArriveAtTarget
+            // 2. CargoTrainAI.ArriveAtTarget (0-second instant unload & despawn)
             Patch(harmony, typeof(CargoTrainAI), "ArriveAtTarget",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoTrainAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 3. PassengerTrainAI.ArriveAtTarget
+            // 3. PassengerTrainAI.ArriveAtTarget (0-second instant release)
             Patch(harmony, typeof(PassengerTrainAI), "ArriveAtTarget",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(PassengerTrainAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 4. ShipAI.SimulationStep
+            // 4. ShipAI.SimulationStep (Touch sea border trigger: <= 50m)
             Patch(harmony, typeof(ShipAI), "SimulationStep",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(ShipAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 5. CargoShipAI.ArriveAtTarget
+            // 5. CargoShipAI.ArriveAtTarget (0-second instant unload & despawn)
             Patch(harmony, typeof(CargoShipAI), "ArriveAtTarget",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoShipAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 6. PassengerShipAI.ArriveAtTarget
+            // 6. PassengerShipAI.ArriveAtTarget (0-second instant release)
             Patch(harmony, typeof(PassengerShipAI), "ArriveAtTarget",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(PassengerShipAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
 
-            // 7. CarAI.SimulationStep
+            // 7. CarAI.SimulationStep (Touch highway border trigger: <= 25m)
             Patch(harmony, typeof(CarAI), "SimulationStep",
                 new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
                 prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CarAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
+
+            // 8. CargoTruckAI.ArriveAtTarget (0-second highway export unload & despawn)
+            Patch(harmony, typeof(CargoTruckAI), "ArriveAtTarget",
+                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
+                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoTruckAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
         }
 
         private static void Patch(Harmony harmony, Type targetType, string methodName, Type[] paramTypes, MethodInfo prefix = null, MethodInfo postfix = null)
@@ -95,8 +100,9 @@ namespace InstantBorderDespawn
                     cargo = next;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] UnloadExportCargo error: " + ex);
             }
         }
 
@@ -118,8 +124,8 @@ namespace InstantBorderDespawn
                             Vector3 trainPos = frameData.m_position;
                             float dx = targetPos.x - trainPos.x;
                             float dz = targetPos.z - trainPos.z;
-                            // If within 150m of outside connection:
-                            if (dx * dx + dz * dz < 22500f)
+                            // Chạm sát mép biên giới: <= 35m (35^2 = 1225)
+                            if (dx * dx + dz * dz <= 1225f)
                             {
                                 UnloadExportCargo(leaderID, ref leaderData);
                                 Singleton<VehicleManager>.instance.ReleaseVehicle(leaderID);
@@ -208,8 +214,8 @@ namespace InstantBorderDespawn
                             Vector3 shipPos = frameData.m_position;
                             float dx = targetPos.x - shipPos.x;
                             float dz = targetPos.z - shipPos.z;
-                            // If within 250m of outside connection:
-                            if (dx * dx + dz * dz < 62500f)
+                            // Chạm sát biên giới hàng hải: <= 50m (50^2 = 2500)
+                            if (dx * dx + dz * dz <= 2500f)
                             {
                                 UnloadExportCargo(leaderID, ref leaderData);
                                 Singleton<VehicleManager>.instance.ReleaseVehicle(leaderID);
@@ -298,8 +304,8 @@ namespace InstantBorderDespawn
                             Vector3 carPos = frameData.m_position;
                             float dx = targetPos.x - carPos.x;
                             float dz = targetPos.z - carPos.z;
-                            // If within 100m of highway outside connection:
-                            if (dx * dx + dz * dz < 10000f)
+                            // Chạm sát vạch biên giới cao tốc: <= 25m (25^2 = 625)
+                            if (dx * dx + dz * dz <= 625f)
                             {
                                 UnloadExportCargo(leaderID, ref leaderData);
                                 Singleton<VehicleManager>.instance.ReleaseVehicle(leaderID);
@@ -311,6 +317,34 @@ namespace InstantBorderDespawn
             }
             catch
             {
+            }
+            return true;
+        }
+
+        public static bool CargoTruckAI_ArriveAtTarget_Prefix(CargoTruckAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
+        {
+            ref Vehicle vehicleData = ref data;
+            try
+            {
+                BuildingManager bm = Singleton<BuildingManager>.instance;
+                if (bm == null) return true;
+
+                ushort target = vehicleData.m_targetBuilding;
+                if (target != 0 && target < bm.m_buildings.m_buffer.Length)
+                {
+                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
+                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
+                    {
+                        UnloadExportCargo(vehicleID, ref vehicleData);
+                        Singleton<VehicleManager>.instance.ReleaseVehicle(vehicleID);
+                        __result = true;
+                        return false;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] CargoTruckAI_ArriveAtTarget_Prefix error: " + ex);
             }
             return true;
         }

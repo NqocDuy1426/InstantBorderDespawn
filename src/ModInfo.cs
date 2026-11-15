@@ -38,67 +38,10 @@ namespace InstantBorderDespawn
         public override void OnLevelLoaded(LoadMode mode)
         {
             UnityEngine.Debug.Log("[InstantBorderDespawn] OnLevelLoaded called, mode=" + mode);
-            if (mode == LoadMode.LoadGame || mode == LoadMode.NewGame)
-            {
-                CleanDeadVehiclesAtBorder();
-            }
-        }
-
-        private static void CleanDeadVehiclesAtBorder()
-        {
-            try
-            {
-                VehicleManager vm = Singleton<VehicleManager>.instance;
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                if (vm == null || bm == null) return;
-
-                int cleaned = 0;
-                for (ushort i = 1; i < vm.m_vehicles.m_buffer.Length; i++)
-                {
-                    if ((vm.m_vehicles.m_buffer[i].m_flags & Vehicle.Flags.Created) == 0) continue;
-
-                    ushort target = vm.m_vehicles.m_buffer[i].m_targetBuilding;
-                    if (target != 0 && target < bm.m_buildings.m_buffer.Length)
-                    {
-                        BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                        if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                        {
-                            Vector3 pos = vm.m_vehicles.m_buffer[i].GetLastFramePosition();
-                            if (BorderDespawnPatches.IsNearOwnTargetOC(target, pos, 300f))
-                            {
-                                if (vm.m_vehicles.m_buffer[i].Info != null && vm.m_vehicles.m_buffer[i].Info.m_vehicleAI is TrainAI)
-                                {
-                                    if (vm.m_vehicles.m_buffer[i].m_leadingVehicle == 0)
-                                    {
-                                        BorderDespawnPatches.DespawnTrain(i, ref vm.m_vehicles.m_buffer[i]);
-                                        cleaned++;
-                                    }
-                                }
-                                else if (vm.m_vehicles.m_buffer[i].Info != null && vm.m_vehicles.m_buffer[i].Info.m_vehicleAI is CarAI)
-                                {
-                                    if (vm.m_vehicles.m_buffer[i].m_leadingVehicle == 0)
-                                    {
-                                        BorderDespawnPatches.DespawnCarOrTruck(i, ref vm.m_vehicles.m_buffer[i]);
-                                        cleaned++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (cleaned > 0)
-                {
-                    UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] LevelLoaded: Cleaned up {0} stranded/dead vehicles at borders.", cleaned));
-                }
-                else
-                {
-                    UnityEngine.Debug.Log("[InstantBorderDespawn] LevelLoaded: No stranded vehicles found at borders.");
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] CleanDeadVehiclesAtBorder error: " + ex);
-            }
+            // Cleanup is now handled by SimulationStep prefixes during gameplay.
+            // Doing it here caused hangs because ArriveAtDestination on cargo items
+            // can trigger FindNextCargoParent/SwitchCargoParent which deadlocks
+            // when called during the loading phase.
         }
     }
 

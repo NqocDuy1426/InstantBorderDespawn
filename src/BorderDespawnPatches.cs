@@ -12,6 +12,8 @@ namespace InstantBorderDespawn
         private static int s_despawnedTrains = 0;
         private static int s_despawnedTrucks = 0;
         private static int s_despawnedShips = 0;
+        private static int s_simStepCalls = 0;
+        private static bool s_loggedFirstBatch = false;
 
         public static void Apply(Harmony harmony)
         {
@@ -83,9 +85,10 @@ namespace InstantBorderDespawn
         }
 
         /// <summary>
-        /// Check if vehicle is near its target OC building. Used by ArriveAtTarget prefixes.
+        /// Check if vehicle is near its OWN target OC building (not any random OC).
+        /// Used by SimulationStep prefixes to catch stuck vehicles near their destination.
         /// </summary>
-        public static bool IsAtOutsideConnection(ushort targetBuilding, Vector3 vehiclePos, float maxDistance = 150f)
+        public static bool IsNearOwnTargetOC(ushort targetBuilding, Vector3 vehiclePos, float maxDistance = 150f)
         {
             if (targetBuilding == 0) return false;
             BuildingManager bm = Singleton<BuildingManager>.instance;
@@ -94,37 +97,27 @@ namespace InstantBorderDespawn
             BuildingInfo bInfo = bm.m_buildings.m_buffer[targetBuilding].Info;
             if (bInfo == null || !(bInfo.m_buildingAI is OutsideConnectionAI)) return false;
 
+            // Must be near THIS specific OC building (the vehicle's own target)
             Vector3 targetPos = bm.m_buildings.m_buffer[targetBuilding].m_position;
             float dx = targetPos.x - vehiclePos.x;
             float dz = targetPos.z - vehiclePos.z;
-            float maxDistSqr = maxDistance * maxDistance;
+            float distSqr = dx * dx + dz * dz;
 
-            if (dx * dx + dz * dz <= maxDistSqr) return true;
-
-            return false;
+            return distSqr <= maxDistance * maxDistance;
         }
 
         /// <summary>
-        /// Check if vehicle is at map edge AND heading to an outside connection.
-        /// Used by SimulationStep prefixes as a safety net to catch stuck vehicles near borders.
-        /// Only triggers at the absolute map edge to avoid despawning vehicles mid-journey.
+        /// Check if vehicle target is an outside connection building.
+        /// Used by ArriveAtTarget prefixes (game already confirmed arrival).
         /// </summary>
-        public static bool IsAtMapEdgeHeadingOut(ushort targetBuilding, Vector3 vehiclePos)
+        public static bool IsTargetOutsideConnection(ushort targetBuilding)
         {
-            // Must be heading to an outside connection
             if (targetBuilding == 0) return false;
             BuildingManager bm = Singleton<BuildingManager>.instance;
             if (bm == null || targetBuilding >= bm.m_buildings.m_buffer.Length) return false;
 
             BuildingInfo bInfo = bm.m_buildings.m_buffer[targetBuilding].Info;
-            if (bInfo == null || !(bInfo.m_buildingAI is OutsideConnectionAI)) return false;
-
-            // Only despawn at absolute map edge (25-tile: ±4800m)
-            float absX = Mathf.Abs(vehiclePos.x);
-            float absZ = Mathf.Abs(vehiclePos.z);
-            if (absX >= 4700f || absZ >= 4700f) return true;
-
-            return false;
+            return bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI;
         }
 
         public static void DespawnTrain(ushort leaderID, ref Vehicle leaderData)
@@ -266,8 +259,21 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                // Safety net: only despawn at absolute map edge, not mid-journey
-                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
+                // Debug: log first few calls to confirm prefix is firing
+                s_simStepCalls++;
+                if (!s_loggedFirstBatch && s_simStepCalls <= 5)
+                {
+                    UnityEngine.Debug.Log(string.Format(
+                        "[InstantBorderDespawn] TrainAI.SimStep #{0}: vID={1} target={2} pos=({3:F0},{4:F0},{5:F0}) AI={6}",
+                        s_simStepCalls, vehicleID, leaderData.m_targetBuilding,
+                        frameData.m_position.x, frameData.m_position.y, frameData.m_position.z,
+                        __instance.GetType().Name));
+                    if (s_simStepCalls == 5) s_loggedFirstBatch = true;
+                }
+
+                // Despawn when near OWN target OC building (not any random OC)
+                // This catches trains that are stuck/queued near their destination OC
+                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 150f))
                 {
                     DespawnTrain(leaderID, ref leaderData);
                     return false;
@@ -283,17 +289,11 @@ namespace InstantBorderDespawn
         {
             try
             {
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                ushort target = data.m_targetBuilding;
-                if (bm != null && target != 0 && target < bm.m_buildings.m_buffer.Length)
+                if (IsTargetOutsideConnection(data.m_targetBuilding))
                 {
-                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                    {
-                        DespawnTrain(vehicleID, ref data);
-                        __result = true;
-                        return false;
-                    }
+                    DespawnTrain(vehicleID, ref data);
+                    __result = true;
+                    return false;
                 }
             }
             catch (Exception ex)
@@ -307,17 +307,11 @@ namespace InstantBorderDespawn
         {
             try
             {
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                ushort target = data.m_targetBuilding;
-                if (bm != null && target != 0 && target < bm.m_buildings.m_buffer.Length)
+                if (IsTargetOutsideConnection(data.m_targetBuilding))
                 {
-                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                    {
-                        DespawnTrain(vehicleID, ref data);
-                        __result = true;
-                        return false;
-                    }
+                    DespawnTrain(vehicleID, ref data);
+                    __result = true;
+                    return false;
                 }
             }
             catch (Exception ex)
@@ -332,8 +326,7 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                // Safety net: only despawn at absolute map edge
-                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
+                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 200f))
                 {
                     DespawnShip(leaderID, ref leaderData);
                     return false;
@@ -349,17 +342,11 @@ namespace InstantBorderDespawn
         {
             try
             {
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                ushort target = data.m_targetBuilding;
-                if (bm != null && target != 0 && target < bm.m_buildings.m_buffer.Length)
+                if (IsTargetOutsideConnection(data.m_targetBuilding))
                 {
-                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                    {
-                        DespawnShip(vehicleID, ref data);
-                        __result = true;
-                        return false;
-                    }
+                    DespawnShip(vehicleID, ref data);
+                    __result = true;
+                    return false;
                 }
             }
             catch (Exception ex)
@@ -373,17 +360,11 @@ namespace InstantBorderDespawn
         {
             try
             {
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                ushort target = data.m_targetBuilding;
-                if (bm != null && target != 0 && target < bm.m_buildings.m_buffer.Length)
+                if (IsTargetOutsideConnection(data.m_targetBuilding))
                 {
-                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                    {
-                        DespawnShip(vehicleID, ref data);
-                        __result = true;
-                        return false;
-                    }
+                    DespawnShip(vehicleID, ref data);
+                    __result = true;
+                    return false;
                 }
             }
             catch (Exception ex)
@@ -398,8 +379,7 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                // Safety net: only despawn at absolute map edge
-                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
+                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 120f))
                 {
                     DespawnCarOrTruck(leaderID, ref leaderData);
                     return false;
@@ -415,17 +395,11 @@ namespace InstantBorderDespawn
         {
             try
             {
-                BuildingManager bm = Singleton<BuildingManager>.instance;
-                ushort target = data.m_targetBuilding;
-                if (bm != null && target != 0 && target < bm.m_buildings.m_buffer.Length)
+                if (IsTargetOutsideConnection(data.m_targetBuilding))
                 {
-                    BuildingInfo bInfo = bm.m_buildings.m_buffer[target].Info;
-                    if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
-                    {
-                        DespawnCarOrTruck(vehicleID, ref data);
-                        __result = true;
-                        return false;
-                    }
+                    DespawnCarOrTruck(vehicleID, ref data);
+                    __result = true;
+                    return false;
                 }
             }
             catch (Exception ex)

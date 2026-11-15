@@ -37,6 +37,7 @@ namespace InstantBorderDespawn
     {
         public override void OnLevelLoaded(LoadMode mode)
         {
+            UnityEngine.Debug.Log("[InstantBorderDespawn] OnLevelLoaded called, mode=" + mode);
             if (mode == LoadMode.LoadGame || mode == LoadMode.NewGame)
             {
                 CleanDeadVehiclesAtBorder();
@@ -63,7 +64,7 @@ namespace InstantBorderDespawn
                         if (bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI)
                         {
                             Vector3 pos = vm.m_vehicles.m_buffer[i].GetLastFramePosition();
-                            if (BorderDespawnPatches.IsAtOutsideConnection(target, pos, 300f))
+                            if (BorderDespawnPatches.IsNearOwnTargetOC(target, pos, 300f))
                             {
                                 if (vm.m_vehicles.m_buffer[i].Info != null && vm.m_vehicles.m_buffer[i].Info.m_vehicleAI is TrainAI)
                                 {
@@ -88,6 +89,10 @@ namespace InstantBorderDespawn
                 if (cleaned > 0)
                 {
                     UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] LevelLoaded: Cleaned up {0} stranded/dead vehicles at borders.", cleaned));
+                }
+                else
+                {
+                    UnityEngine.Debug.Log("[InstantBorderDespawn] LevelLoaded: No stranded vehicles found at borders.");
                 }
             }
             catch (Exception ex)

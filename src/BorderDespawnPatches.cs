@@ -15,6 +15,10 @@ namespace InstantBorderDespawn
         private static int s_simStepCalls = 0;
         private static bool s_loggedFirstBatch = false;
 
+        // Guard flag: when true, ArriveAtTarget prefixes let the original run
+        // so that delivery revenue is properly credited before we release
+        private static bool s_inDespawn = false;
+
         public static void Apply(Harmony harmony)
         {
             if (harmony == null) return;
@@ -127,7 +131,21 @@ namespace InstantBorderDespawn
                 VehicleManager vm = Singleton<VehicleManager>.instance;
                 if (vm == null) return;
 
-                // 1. Collect all vehicles in this train chain (locomotive + wagons)
+                // 1. Credit the delivery via vanilla ArriveAtDestination
+                // This calls ArriveAtTarget internally, which credits export revenue
+                VehicleInfo leaderInfo = leaderData.Info;
+                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
+                {
+                    s_inDespawn = true;
+                    try
+                    {
+                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
+                    }
+                    catch { }
+                    s_inDespawn = false;
+                }
+
+                // 2. Collect all vehicles in this train chain (locomotive + wagons)
                 List<ushort> chain = new List<ushort>();
                 ushort current = leaderID;
                 int guard = 0;
@@ -137,9 +155,9 @@ namespace InstantBorderDespawn
                     current = vm.m_vehicles.m_buffer[current].m_trailingVehicle;
                 }
 
-                // 2. Unload cargo on EVERY vehicle in the chain
+                // 3. Unload remaining cargo on wagons (ArriveAtDestination above only handles leader's cargo)
                 int totalCargoCount = 0;
-                for (int i = 0; i < chain.Count; i++)
+                for (int i = 1; i < chain.Count; i++) // start from 1 to skip leader (already handled)
                 {
                     ushort vID = chain[i];
                     ushort cargo = vm.m_vehicles.m_buffer[vID].m_firstCargo;
@@ -150,18 +168,13 @@ namespace InstantBorderDespawn
                         ushort next = vm.m_vehicles.m_buffer[cargo].m_nextCargo;
                         vm.m_vehicles.m_buffer[cargo].m_nextCargo = 0;
                         vm.m_vehicles.m_buffer[cargo].m_cargoParent = 0;
-                        VehicleInfo cInfo = vm.m_vehicles.m_buffer[cargo].Info;
-                        if (cInfo != null && cInfo.m_vehicleAI != null)
-                        {
-                            cInfo.m_vehicleAI.ArriveAtDestination(cargo, ref vm.m_vehicles.m_buffer[cargo]);
-                        }
                         vm.ReleaseVehicle(cargo);
                         cargo = next;
                         totalCargoCount++;
                     }
                 }
 
-                // 3. Release wagons and locomotive in reverse order
+                // 4. Release wagons and locomotive in reverse order
                 for (int i = chain.Count - 1; i >= 0; i--)
                 {
                     ushort vID = chain[i];
@@ -189,16 +202,30 @@ namespace InstantBorderDespawn
                 VehicleManager vm = Singleton<VehicleManager>.instance;
                 if (vm == null) return;
 
+                // Credit the delivery BEFORE releasing
+                // ArriveAtDestination -> ArriveAtTarget handles export revenue
+                VehicleInfo leaderInfo = leaderData.Info;
+                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
+                {
+                    s_inDespawn = true;
+                    try
+                    {
+                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
+                    }
+                    catch { }
+                    s_inDespawn = false;
+                }
+
+                // Now release trailer if any
                 ushort trailer = leaderData.m_trailingVehicle;
                 if (trailer != 0)
                 {
                     leaderData.m_trailingVehicle = 0;
                     vm.m_vehicles.m_buffer[trailer].m_leadingVehicle = 0;
-                    UnloadVehicleCargo(trailer, ref vm.m_vehicles.m_buffer[trailer]);
                     vm.ReleaseVehicle(trailer);
                 }
 
-                UnloadVehicleCargo(leaderID, ref leaderData);
+                // Release leader
                 vm.ReleaseVehicle(leaderID);
 
                 s_despawnedTrucks++;
@@ -220,7 +247,19 @@ namespace InstantBorderDespawn
                 VehicleManager vm = Singleton<VehicleManager>.instance;
                 if (vm == null) return;
 
-                UnloadVehicleCargo(leaderID, ref leaderData);
+                // Credit the delivery first
+                VehicleInfo leaderInfo = leaderData.Info;
+                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
+                {
+                    s_inDespawn = true;
+                    try
+                    {
+                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
+                    }
+                    catch { }
+                    s_inDespawn = false;
+                }
+
                 vm.ReleaseVehicle(leaderID);
 
                 s_despawnedShips++;
@@ -287,6 +326,7 @@ namespace InstantBorderDespawn
 
         public static bool CargoTrainAI_ArriveAtTarget_Prefix(CargoTrainAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
         {
+            if (s_inDespawn) return true; // Let original run to credit delivery
             try
             {
                 if (IsTargetOutsideConnection(data.m_targetBuilding))
@@ -305,6 +345,7 @@ namespace InstantBorderDespawn
 
         public static bool PassengerTrainAI_ArriveAtTarget_Prefix(PassengerTrainAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
         {
+            if (s_inDespawn) return true;
             try
             {
                 if (IsTargetOutsideConnection(data.m_targetBuilding))
@@ -340,6 +381,7 @@ namespace InstantBorderDespawn
 
         public static bool CargoShipAI_ArriveAtTarget_Prefix(CargoShipAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
         {
+            if (s_inDespawn) return true;
             try
             {
                 if (IsTargetOutsideConnection(data.m_targetBuilding))
@@ -358,6 +400,7 @@ namespace InstantBorderDespawn
 
         public static bool PassengerShipAI_ArriveAtTarget_Prefix(PassengerShipAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
         {
+            if (s_inDespawn) return true;
             try
             {
                 if (IsTargetOutsideConnection(data.m_targetBuilding))
@@ -393,6 +436,7 @@ namespace InstantBorderDespawn
 
         public static bool CargoTruckAI_ArriveAtTarget_Prefix(CargoTruckAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
         {
+            if (s_inDespawn) return true;
             try
             {
                 if (IsTargetOutsideConnection(data.m_targetBuilding))

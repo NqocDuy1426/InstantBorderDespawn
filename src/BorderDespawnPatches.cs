@@ -82,6 +82,9 @@ namespace InstantBorderDespawn
             }
         }
 
+        /// <summary>
+        /// Check if vehicle is near its target OC building. Used by ArriveAtTarget prefixes.
+        /// </summary>
         public static bool IsAtOutsideConnection(ushort targetBuilding, Vector3 vehiclePos, float maxDistance = 150f)
         {
             if (targetBuilding == 0) return false;
@@ -96,13 +99,30 @@ namespace InstantBorderDespawn
             float dz = targetPos.z - vehiclePos.z;
             float maxDistSqr = maxDistance * maxDistance;
 
-            // 1. Within radius of outside connection building
             if (dx * dx + dz * dz <= maxDistSqr) return true;
 
-            // 2. Near map edge (4800m is 25-tile edge, 8640m is 81-tile edge)
+            return false;
+        }
+
+        /// <summary>
+        /// Check if vehicle is at map edge AND heading to an outside connection.
+        /// Used by SimulationStep prefixes as a safety net to catch stuck vehicles near borders.
+        /// Only triggers at the absolute map edge to avoid despawning vehicles mid-journey.
+        /// </summary>
+        public static bool IsAtMapEdgeHeadingOut(ushort targetBuilding, Vector3 vehiclePos)
+        {
+            // Must be heading to an outside connection
+            if (targetBuilding == 0) return false;
+            BuildingManager bm = Singleton<BuildingManager>.instance;
+            if (bm == null || targetBuilding >= bm.m_buildings.m_buffer.Length) return false;
+
+            BuildingInfo bInfo = bm.m_buildings.m_buffer[targetBuilding].Info;
+            if (bInfo == null || !(bInfo.m_buildingAI is OutsideConnectionAI)) return false;
+
+            // Only despawn at absolute map edge (25-tile: ±4800m)
             float absX = Mathf.Abs(vehiclePos.x);
             float absZ = Mathf.Abs(vehiclePos.z);
-            if (absX >= 4600f || absZ >= 4600f) return true;
+            if (absX >= 4700f || absZ >= 4700f) return true;
 
             return false;
         }
@@ -246,7 +266,8 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                if (IsAtOutsideConnection(leaderData.m_targetBuilding, frameData.m_position, 150f))
+                // Safety net: only despawn at absolute map edge, not mid-journey
+                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
                 {
                     DespawnTrain(leaderID, ref leaderData);
                     return false;
@@ -311,7 +332,8 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                if (IsAtOutsideConnection(leaderData.m_targetBuilding, frameData.m_position, 200f))
+                // Safety net: only despawn at absolute map edge
+                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
                 {
                     DespawnShip(leaderID, ref leaderData);
                     return false;
@@ -376,7 +398,8 @@ namespace InstantBorderDespawn
             if (vehicleID != leaderID) return true;
             try
             {
-                if (IsAtOutsideConnection(leaderData.m_targetBuilding, frameData.m_position, 120f))
+                // Safety net: only despawn at absolute map edge
+                if (IsAtMapEdgeHeadingOut(leaderData.m_targetBuilding, frameData.m_position))
                 {
                     DespawnCarOrTruck(leaderID, ref leaderData);
                     return false;

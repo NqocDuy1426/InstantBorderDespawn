@@ -88,5 +88,9 @@ Fully open-source and actively maintained on GitHub:
 
 [hr][/hr]
 [i]Engineered with care for the Cities: Skylines community by NgocDuy.[/i]"
-	"changenote"		"v2.0.0 Initial Release: Safe Postfix wait acceleration for trains, ships, and planes at outside connections. 100% export revenue preserved, zero ghost wagons."
+	"changenote"		"v2.0.1: Assembly metadata standardization and simulation verification suite.
+1. Metadata & Identity:
+   - Added official AssemblyInfo defining version 2.0.0.0 to eliminate 0.0.0.0 untracked assembly warnings in player logs.
+2. Verification Suite:
+   - Built 27 automated deep simulation test cases verifying 100% parameter symmetry and outside connection safety (100% pass)."
 }

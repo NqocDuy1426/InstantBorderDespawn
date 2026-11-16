@@ -2,8 +2,6 @@ using System;
 using ICities;
 using CitiesHarmony.API;
 using HarmonyLib;
-using ColossalFramework;
-using UnityEngine;
 
 namespace InstantBorderDespawn
 {
@@ -11,7 +9,7 @@ namespace InstantBorderDespawn
     {
         public const string HARMONY_ID = "com.ngocduy.instantborderdespawn";
         public const string MOD_NAME = "Instant Border Despawn by NgocDuy";
-        public const string MOD_DESCRIPTION = "Instantly clears trains, ships, and vehicles upon arriving at outside connections to eliminate border traffic jams and train gridlocks.";
+        public const string MOD_DESCRIPTION = "Accelerates vehicle release at outside connections. No more waiting 16-64 frames — vehicles despawn on the next frame after delivery.";
 
         public string Name => MOD_NAME;
         public string Description => MOD_DESCRIPTION;
@@ -33,18 +31,6 @@ namespace InstantBorderDespawn
         }
     }
 
-    public sealed class LoadingExtension : LoadingExtensionBase
-    {
-        public override void OnLevelLoaded(LoadMode mode)
-        {
-            UnityEngine.Debug.Log("[InstantBorderDespawn] OnLevelLoaded called, mode=" + mode);
-            // Cleanup is now handled by SimulationStep prefixes during gameplay.
-            // Doing it here caused hangs because ArriveAtDestination on cargo items
-            // can trigger FindNextCargoParent/SwitchCargoParent which deadlocks
-            // when called during the loading phase.
-        }
-    }
-
     public static class Patcher
     {
         private static bool s_isPatched = false;
@@ -54,7 +40,7 @@ namespace InstantBorderDespawn
             if (s_isPatched) return;
             try
             {
-                UnityEngine.Debug.Log("[InstantBorderDespawn] Applying Harmony patches...");
+                UnityEngine.Debug.Log("[InstantBorderDespawn] v2.0.0 — Applying Harmony patches...");
                 Harmony harmony = new Harmony(ModInfo.HARMONY_ID);
                 BorderDespawnPatches.Apply(harmony);
                 s_isPatched = true;

@@ -1,120 +1,122 @@
 using System;
-using System.Collections.Generic;
 using System.Reflection;
 using ColossalFramework;
 using HarmonyLib;
-using UnityEngine;
 
 namespace InstantBorderDespawn
 {
+    /// <summary>
+    /// Instant Border Despawn v2.0.0
+    /// 
+    /// Instead of forcefully deleting vehicles (which causes infinite loops or missed export revenue),
+    /// we attach a postfix to ArriveAtDestination for trains, ships, and planes.
+    /// 
+    /// Vanilla Flow:
+    /// 1. Vehicle reaches border outside connection.
+    /// 2. Frame 0: Vanilla ArriveAtDestination calls ArriveAtTarget, crediting export revenue
+    ///    and unloading goods, then sets Vehicle.Flags.WaitingLoading (0x02000000) and waitCounter = 0.
+    /// 3. Our Postfix: Detects WaitingLoading flag at Outside Connection, sets waitCounter = 250.
+    /// 4. Frame 1: Vanilla ArriveAtDestination sees waitCounter >= 16, cleanly releases vehicle
+    ///    (locomotive, all trailing wagons, cargo items) via VehicleManager.ReleaseVehicle.
+    /// 
+    /// Result: Instant despawn at border with 100% vanilla safety and accurate export revenue!
+    /// </summary>
     public static class BorderDespawnPatches
     {
-        private static int s_despawnedTrains = 0;
-        private static int s_despawnedTrucks = 0;
-        private static int s_despawnedShips = 0;
-        private static int s_simStepCalls = 0;
-        private static bool s_loggedFirstBatch = false;
-
-        // Guard flag: when true, ArriveAtTarget prefixes let the original run
-        // so that delivery revenue is properly credited before we release
-        private static bool s_inDespawn = false;
+        private static int s_acceleratedCount = 0;
 
         public static void Apply(Harmony harmony)
         {
             if (harmony == null) return;
 
-            // 1. TrainAI.SimulationStep
-            Patch(harmony, typeof(TrainAI), "SimulationStep",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(TrainAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
+            string[] vehicleClasses = {
+                "CargoTrainAI",
+                "PassengerTrainAI",
+                "CargoShipAI",
+                "PassengerShipAI",
+                "CargoPlaneAI",
+                "PassengerPlaneAI"
+            };
 
-            // 2. CargoTrainAI.ArriveAtTarget
-            Patch(harmony, typeof(CargoTrainAI), "ArriveAtTarget",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoTrainAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
+            MethodInfo postfix = typeof(BorderDespawnPatches).GetMethod(
+                nameof(Generic_ArriveAtDestination_Postfix),
+                BindingFlags.Public | BindingFlags.Static
+            );
 
-            // 3. PassengerTrainAI.ArriveAtTarget
-            Patch(harmony, typeof(PassengerTrainAI), "ArriveAtTarget",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(PassengerTrainAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
+            foreach (string cls in vehicleClasses)
+            {
+                try
+                {
+                    Type t = typeof(VehicleAI).Assembly.GetType(cls);
+                    if (t == null)
+                    {
+                        Log("Class not found: " + cls);
+                        continue;
+                    }
 
-            // 4. ShipAI.SimulationStep
-            Patch(harmony, typeof(ShipAI), "SimulationStep",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(ShipAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
+                    MethodInfo original = t.GetMethod(
+                        "ArriveAtDestination",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly,
+                        null,
+                        new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
+                        null
+                    );
 
-            // 5. CargoShipAI.ArriveAtTarget
-            Patch(harmony, typeof(CargoShipAI), "ArriveAtTarget",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoShipAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
+                    if (original == null)
+                    {
+                        Log("Method not found: " + cls + ".ArriveAtDestination");
+                        continue;
+                    }
 
-            // 6. PassengerShipAI.ArriveAtTarget
-            Patch(harmony, typeof(PassengerShipAI), "ArriveAtTarget",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(PassengerShipAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
-
-            // 7. CarAI.SimulationStep
-            Patch(harmony, typeof(CarAI), "SimulationStep",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(Vehicle.Frame).MakeByRefType(), typeof(ushort), typeof(Vehicle).MakeByRefType(), typeof(int) },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CarAI_SimulationStep_Prefix), BindingFlags.Public | BindingFlags.Static));
-
-            // 8. CargoTruckAI.ArriveAtTarget
-            Patch(harmony, typeof(CargoTruckAI), "ArriveAtTarget",
-                new Type[] { typeof(ushort), typeof(Vehicle).MakeByRefType() },
-                prefix: typeof(BorderDespawnPatches).GetMethod(nameof(CargoTruckAI_ArriveAtTarget_Prefix), BindingFlags.Public | BindingFlags.Static));
+                    harmony.Patch(original, postfix: new HarmonyMethod(postfix));
+                    Log("Successfully patched " + cls + ".ArriveAtDestination (postfix)");
+                }
+                catch (Exception ex)
+                {
+                    Log("Error patching " + cls + ": " + ex.Message);
+                }
+            }
         }
 
-        private static void Patch(Harmony harmony, Type targetType, string methodName, Type[] paramTypes, MethodInfo prefix = null, MethodInfo postfix = null)
+        /// <summary>
+        /// Postfix on ArriveAtDestination(ushort vehicleID, ref Vehicle vehicleData).
+        /// Parameter names MUST match the target method's parameters for Harmony binding.
+        /// </summary>
+        public static void Generic_ArriveAtDestination_Postfix(ushort vehicleID, ref Vehicle vehicleData)
         {
             try
             {
-                if (targetType == null) return;
-                MethodInfo m = targetType.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, paramTypes, null);
-                if (m != null)
+                // Skip if vehicle has already been released/unspawned
+                if ((vehicleData.m_flags & Vehicle.Flags.Created) == 0) return;
+
+                // Only accelerate at outside connections
+                if (!IsTargetOutsideConnection(vehicleData.m_targetBuilding)) return;
+
+                // WaitingLoading flag (0x02000000) indicates ArriveAtTarget has completed
+                // delivery, credited revenue, and set the vehicle into waiting state.
+                if ((vehicleData.m_flags & Vehicle.Flags.WaitingLoading) != 0)
                 {
-                    HarmonyMethod hPre = (prefix != null) ? new HarmonyMethod(prefix) { priority = Priority.First } : null;
-                    HarmonyMethod hPost = (postfix != null) ? new HarmonyMethod(postfix) : null;
-                    harmony.Patch(m, prefix: hPre, postfix: hPost);
-                    UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] Patched {0}.{1}", targetType.Name, methodName));
-                }
-                else
-                {
-                    UnityEngine.Debug.LogWarning(string.Format("[InstantBorderDespawn] Method {0}.{1} not found!", targetType.Name, methodName));
+                    // Max out wait counter so vanilla will release on the next simulation frame
+                    vehicleData.m_waitCounter = 250;
+                    Singleton<VehicleManager>.instance.m_vehicles.m_buffer[vehicleID].m_waitCounter = 250;
+
+                    s_acceleratedCount++;
+                    if (s_acceleratedCount <= 10 || s_acceleratedCount % 50 == 0)
+                    {
+                        VehicleInfo info = vehicleData.Info;
+                        string aiName = info?.m_vehicleAI?.GetType().Name ?? "UnknownAI";
+                        Log(string.Format("Accelerated border despawn #{0}: vID={1} ({2}) at OC={3}",
+                            s_acceleratedCount, vehicleID, aiName, vehicleData.m_targetBuilding));
+                    }
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                UnityEngine.Debug.LogWarning(string.Format("[InstantBorderDespawn] Error patching {0}.{1}: {2}", targetType?.Name, methodName, ex.Message));
+                // Never disrupt vanilla simulation
             }
         }
 
-        /// <summary>
-        /// Check if vehicle is near its OWN target OC building (not any random OC).
-        /// Used by SimulationStep prefixes to catch stuck vehicles near their destination.
-        /// </summary>
-        public static bool IsNearOwnTargetOC(ushort targetBuilding, Vector3 vehiclePos, float maxDistance = 150f)
-        {
-            if (targetBuilding == 0) return false;
-            BuildingManager bm = Singleton<BuildingManager>.instance;
-            if (bm == null || targetBuilding >= bm.m_buildings.m_buffer.Length) return false;
-
-            BuildingInfo bInfo = bm.m_buildings.m_buffer[targetBuilding].Info;
-            if (bInfo == null || !(bInfo.m_buildingAI is OutsideConnectionAI)) return false;
-
-            // Must be near THIS specific OC building (the vehicle's own target)
-            Vector3 targetPos = bm.m_buildings.m_buffer[targetBuilding].m_position;
-            float dx = targetPos.x - vehiclePos.x;
-            float dz = targetPos.z - vehiclePos.z;
-            float distSqr = dx * dx + dz * dz;
-
-            return distSqr <= maxDistance * maxDistance;
-        }
-
-        /// <summary>
-        /// Check if vehicle target is an outside connection building.
-        /// Used by ArriveAtTarget prefixes (game already confirmed arrival).
-        /// </summary>
-        public static bool IsTargetOutsideConnection(ushort targetBuilding)
+        private static bool IsTargetOutsideConnection(ushort targetBuilding)
         {
             if (targetBuilding == 0) return false;
             BuildingManager bm = Singleton<BuildingManager>.instance;
@@ -124,333 +126,9 @@ namespace InstantBorderDespawn
             return bInfo != null && bInfo.m_buildingAI is OutsideConnectionAI;
         }
 
-        public static void DespawnTrain(ushort leaderID, ref Vehicle leaderData)
+        private static void Log(string msg)
         {
-            try
-            {
-                VehicleManager vm = Singleton<VehicleManager>.instance;
-                if (vm == null) return;
-
-                // 1. Credit the delivery via vanilla ArriveAtDestination
-                // This calls ArriveAtTarget internally, which credits export revenue
-                VehicleInfo leaderInfo = leaderData.Info;
-                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
-                {
-                    s_inDespawn = true;
-                    try
-                    {
-                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
-                    }
-                    catch { }
-                    s_inDespawn = false;
-                }
-
-                // 2. Collect all vehicles in this train chain (locomotive + wagons)
-                List<ushort> chain = new List<ushort>();
-                ushort current = leaderID;
-                int guard = 0;
-                while (current != 0 && guard++ < 100)
-                {
-                    chain.Add(current);
-                    current = vm.m_vehicles.m_buffer[current].m_trailingVehicle;
-                }
-
-                // 3. Unload remaining cargo on wagons (ArriveAtDestination above only handles leader's cargo)
-                int totalCargoCount = 0;
-                for (int i = 1; i < chain.Count; i++) // start from 1 to skip leader (already handled)
-                {
-                    ushort vID = chain[i];
-                    ushort cargo = vm.m_vehicles.m_buffer[vID].m_firstCargo;
-                    vm.m_vehicles.m_buffer[vID].m_firstCargo = 0;
-                    int cGuard = 0;
-                    while (cargo != 0 && cGuard++ < 16384)
-                    {
-                        ushort next = vm.m_vehicles.m_buffer[cargo].m_nextCargo;
-                        vm.m_vehicles.m_buffer[cargo].m_nextCargo = 0;
-                        vm.m_vehicles.m_buffer[cargo].m_cargoParent = 0;
-                        vm.ReleaseVehicle(cargo);
-                        cargo = next;
-                        totalCargoCount++;
-                    }
-                }
-
-                // 4. Release wagons and locomotive in reverse order
-                for (int i = chain.Count - 1; i >= 0; i--)
-                {
-                    ushort vID = chain[i];
-                    vm.m_vehicles.m_buffer[vID].m_trailingVehicle = 0;
-                    vm.m_vehicles.m_buffer[vID].m_leadingVehicle = 0;
-                    vm.ReleaseVehicle(vID);
-                }
-
-                s_despawnedTrains++;
-                if (s_despawnedTrains % 25 == 0 || totalCargoCount > 0)
-                {
-                    UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] Cleared train #{0} (wagons: {1}, cargo: {2})", s_despawnedTrains, chain.Count - 1, totalCargoCount));
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] DespawnTrain error: " + ex);
-            }
-        }
-
-        public static void DespawnCarOrTruck(ushort leaderID, ref Vehicle leaderData)
-        {
-            try
-            {
-                VehicleManager vm = Singleton<VehicleManager>.instance;
-                if (vm == null) return;
-
-                // Credit the delivery BEFORE releasing
-                // ArriveAtDestination -> ArriveAtTarget handles export revenue
-                VehicleInfo leaderInfo = leaderData.Info;
-                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
-                {
-                    s_inDespawn = true;
-                    try
-                    {
-                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
-                    }
-                    catch { }
-                    s_inDespawn = false;
-                }
-
-                // Now release trailer if any
-                ushort trailer = leaderData.m_trailingVehicle;
-                if (trailer != 0)
-                {
-                    leaderData.m_trailingVehicle = 0;
-                    vm.m_vehicles.m_buffer[trailer].m_leadingVehicle = 0;
-                    vm.ReleaseVehicle(trailer);
-                }
-
-                // Release leader
-                vm.ReleaseVehicle(leaderID);
-
-                s_despawnedTrucks++;
-                if (s_despawnedTrucks % 100 == 0)
-                {
-                    UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] Cleared road vehicle #{0}", s_despawnedTrucks));
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] DespawnCarOrTruck error: " + ex);
-            }
-        }
-
-        public static void DespawnShip(ushort leaderID, ref Vehicle leaderData)
-        {
-            try
-            {
-                VehicleManager vm = Singleton<VehicleManager>.instance;
-                if (vm == null) return;
-
-                // Credit the delivery first
-                VehicleInfo leaderInfo = leaderData.Info;
-                if (leaderInfo != null && leaderInfo.m_vehicleAI != null)
-                {
-                    s_inDespawn = true;
-                    try
-                    {
-                        leaderInfo.m_vehicleAI.ArriveAtDestination(leaderID, ref leaderData);
-                    }
-                    catch { }
-                    s_inDespawn = false;
-                }
-
-                vm.ReleaseVehicle(leaderID);
-
-                s_despawnedShips++;
-                UnityEngine.Debug.Log(string.Format("[InstantBorderDespawn] Cleared ship #{0}", s_despawnedShips));
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] DespawnShip error: " + ex);
-            }
-        }
-
-        private static void UnloadVehicleCargo(ushort vID, ref Vehicle vData)
-        {
-            VehicleManager vm = Singleton<VehicleManager>.instance;
-            if (vm == null) return;
-            ushort cargo = vData.m_firstCargo;
-            vData.m_firstCargo = 0;
-            int cGuard = 0;
-            while (cargo != 0 && cGuard++ < 16384)
-            {
-                ushort next = vm.m_vehicles.m_buffer[cargo].m_nextCargo;
-                vm.m_vehicles.m_buffer[cargo].m_nextCargo = 0;
-                vm.m_vehicles.m_buffer[cargo].m_cargoParent = 0;
-                VehicleInfo cInfo = vm.m_vehicles.m_buffer[cargo].Info;
-                if (cInfo != null && cInfo.m_vehicleAI != null)
-                {
-                    cInfo.m_vehicleAI.ArriveAtDestination(cargo, ref vm.m_vehicles.m_buffer[cargo]);
-                }
-                vm.ReleaseVehicle(cargo);
-                cargo = next;
-            }
-        }
-
-        public static bool TrainAI_SimulationStep_Prefix(TrainAI __instance, ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData, ushort leaderID, ref Vehicle leaderData, int lodPhysics)
-        {
-            if (vehicleID != leaderID) return true;
-            try
-            {
-                // Debug: log first few calls to confirm prefix is firing
-                s_simStepCalls++;
-                if (!s_loggedFirstBatch && s_simStepCalls <= 5)
-                {
-                    UnityEngine.Debug.Log(string.Format(
-                        "[InstantBorderDespawn] TrainAI.SimStep #{0}: vID={1} target={2} pos=({3:F0},{4:F0},{5:F0}) AI={6}",
-                        s_simStepCalls, vehicleID, leaderData.m_targetBuilding,
-                        frameData.m_position.x, frameData.m_position.y, frameData.m_position.z,
-                        __instance.GetType().Name));
-                    if (s_simStepCalls == 5) s_loggedFirstBatch = true;
-                }
-
-                // Despawn when near OWN target OC building (not any random OC)
-                // This catches trains that are stuck/queued near their destination OC
-                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 150f))
-                {
-                    DespawnTrain(leaderID, ref leaderData);
-                    return false;
-                }
-            }
-            catch
-            {
-            }
-            return true;
-        }
-
-        public static bool CargoTrainAI_ArriveAtTarget_Prefix(CargoTrainAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
-        {
-            if (s_inDespawn) return true; // Let original run to credit delivery
-            try
-            {
-                if (IsTargetOutsideConnection(data.m_targetBuilding))
-                {
-                    DespawnTrain(vehicleID, ref data);
-                    __result = true;
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] CargoTrainAI_ArriveAtTarget_Prefix error: " + ex);
-            }
-            return true;
-        }
-
-        public static bool PassengerTrainAI_ArriveAtTarget_Prefix(PassengerTrainAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
-        {
-            if (s_inDespawn) return true;
-            try
-            {
-                if (IsTargetOutsideConnection(data.m_targetBuilding))
-                {
-                    DespawnTrain(vehicleID, ref data);
-                    __result = true;
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] PassengerTrainAI_ArriveAtTarget_Prefix error: " + ex);
-            }
-            return true;
-        }
-
-        public static bool ShipAI_SimulationStep_Prefix(ShipAI __instance, ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData, ushort leaderID, ref Vehicle leaderData, int lodPhysics)
-        {
-            if (vehicleID != leaderID) return true;
-            try
-            {
-                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 200f))
-                {
-                    DespawnShip(leaderID, ref leaderData);
-                    return false;
-                }
-            }
-            catch
-            {
-            }
-            return true;
-        }
-
-        public static bool CargoShipAI_ArriveAtTarget_Prefix(CargoShipAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
-        {
-            if (s_inDespawn) return true;
-            try
-            {
-                if (IsTargetOutsideConnection(data.m_targetBuilding))
-                {
-                    DespawnShip(vehicleID, ref data);
-                    __result = true;
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] CargoShipAI_ArriveAtTarget_Prefix error: " + ex);
-            }
-            return true;
-        }
-
-        public static bool PassengerShipAI_ArriveAtTarget_Prefix(PassengerShipAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
-        {
-            if (s_inDespawn) return true;
-            try
-            {
-                if (IsTargetOutsideConnection(data.m_targetBuilding))
-                {
-                    DespawnShip(vehicleID, ref data);
-                    __result = true;
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] PassengerShipAI_ArriveAtTarget_Prefix error: " + ex);
-            }
-            return true;
-        }
-
-        public static bool CarAI_SimulationStep_Prefix(CarAI __instance, ushort vehicleID, ref Vehicle vehicleData, ref Vehicle.Frame frameData, ushort leaderID, ref Vehicle leaderData, int lodPhysics)
-        {
-            if (vehicleID != leaderID) return true;
-            try
-            {
-                if (IsNearOwnTargetOC(leaderData.m_targetBuilding, frameData.m_position, 120f))
-                {
-                    DespawnCarOrTruck(leaderID, ref leaderData);
-                    return false;
-                }
-            }
-            catch
-            {
-            }
-            return true;
-        }
-
-        public static bool CargoTruckAI_ArriveAtTarget_Prefix(CargoTruckAI __instance, ushort vehicleID, ref Vehicle data, ref bool __result)
-        {
-            if (s_inDespawn) return true;
-            try
-            {
-                if (IsTargetOutsideConnection(data.m_targetBuilding))
-                {
-                    DespawnCarOrTruck(vehicleID, ref data);
-                    __result = true;
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                UnityEngine.Debug.LogWarning("[InstantBorderDespawn] CargoTruckAI_ArriveAtTarget_Prefix error: " + ex);
-            }
-            return true;
+            UnityEngine.Debug.Log("[InstantBorderDespawn] " + msg);
         }
     }
 }

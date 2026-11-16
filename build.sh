@@ -27,10 +27,14 @@ mcs -sdk:2 -target:library \
 
 echo "✅ Compiled $MOD_NAME.dll successfully."
 
-echo "2️⃣ Deploying to Cities: Skylines Addons/Mods/$MOD_NAME..."
+echo "2️⃣ Deploying to Cities: Skylines Addons/Mods/$MOD_NAME and content/..."
 mkdir -p "$MOD_DIR"
 cp "$MOD_NAME.dll" "$MOD_DIR/"
 cp "$CITIES_HARMONY_API_DLL" "$MOD_DIR/"
+
+mkdir -p "$SCRIPT_DIR/content"
+cp "$MOD_NAME.dll" "$SCRIPT_DIR/content/"
+cp "$CITIES_HARMONY_API_DLL" "$SCRIPT_DIR/content/"
 
 echo "=========================================================="
 echo "🎉 DEPLOYMENT COMPLETE!"

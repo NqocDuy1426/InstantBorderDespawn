@@ -1,0 +1,92 @@
+"workshopitem"
+{
+	"appid"		"255710"
+	"publishedfileid"		"3841011562"
+	"contentfolder"		"/Users/nqocduy/CS_InstantBorderDespawn/content"
+	"previewfile"		"/Users/nqocduy/CS_InstantBorderDespawn/preview-image.png"
+	"visibility"		"0"
+	"title"		"Instant Border Despawn"
+	"description"		"[h1]INSTANT BORDER DESPAWN v2.0.0[/h1]
+[b]The Definitive Fix for Outside Connection Traffic Jams & Train Gridlocks[/b]
+[i]Developed with precision and performance by NgocDuy[/i]
+
+[hr][/hr]
+
+[h1]🛑 THE PROBLEM IN VANILLA CITIES: SKYLINES[/h1]
+Have you ever noticed massive lines of export cargo trains, passenger trains, and ships backed up for kilometers outside your city borders?
+
+In vanilla Cities: Skylines, when any vehicle reaches an [b]Outside Connection[/b] (map edge), it enters a forced internal waiting state lasting [b]16 to 64 simulation frames[/b] before the game engine finally releases it.
+[list]
+[*] As your city grows, export traffic intensifies and trains pile up waiting to exit the map.
+[*] The resulting rail gridlock blocks cargo lines across your entire metropolitan network.
+[*] [b]The devastating consequence:[/b] Factories and oil refineries cannot export goods. Buildings throughout your industrial districts show [b]'Not enough buyers'[/b], production halts, and municipal tax revenue plummets.
+[/list]
+
+[hr][/hr]
+
+[h1]⚡ THE SOLUTION: INSTANT BORDER DESPAWN[/h1]
+[b]Instant Border Despawn[/b] completely resolves border gridlocks using an ultra-safe, lightweight Harmony postfix architecture:
+
+[list]
+[*] [b]100% Export Revenue Guaranteed (Frame 0):[/b] When a vehicle arrives at an Outside Connection, the game native [i]ArriveAtTarget[/i] runs completely. All export income is credited to your city treasury, material buffers are updated, and transactions are officially fulfilled.
+[*] [b]Instant Release Acceleration:[/b] As soon as delivery completes and the vehicle enters its waiting phase ([i]Vehicle.Flags.WaitingLoading[/i]), the mod instantly advances the wait counter to maximum.
+[*] [b]Clean Native Engine Despawn (Frame 1):[/b] On the very next simulation frame, the vanilla game engine recognizes the wait is complete and natively releases the locomotive, all trailing wagons, and cargo units cleanly via [i]VehicleManager.ReleaseVehicle[/i].
+[/list]
+
+[hr][/hr]
+
+[h1]✨ KEY ADVANTAGES & FEATURES[/h1]
+[list]
+[*] [b]Instant Turnaround:[/b] Trains, ships, and planes despawn in 1 frame after delivering their cargo, keeping border tracks permanently clear.
+[*] [b]Zero Ghost Wagons:[/b] Relies on the vanilla engine native cleanup chain so no orphaned rail cars or ghost vehicles ever block the tracks.
+[*] [b]Accurate Economy Simulation:[/b] Industrial export earnings and commercial trade volumes are fully preserved.
+[*] [b]Zero Performance Overhead:[/b] No per-frame spatial grid scans, no expensive raycasts, and no custom physics. Just clean, microsecond postfix hooks.
+[*] [b]Active Diagnostics:[/b] Informative and clean logging in output_log.txt / Player.log to monitor outside connection health.
+[/list]
+
+[hr][/hr]
+
+[h1]🛠️ SUPPORTED VEHICLE TYPES[/h1]
+[list]
+[*] [b]Cargo Trains[/b] ([i]CargoTrainAI[/i])
+[*] [b]Passenger Trains[/b] ([i]PassengerTrainAI[/i])
+[*] [b]Cargo Ships[/b] ([i]CargoShipAI[/i])
+[*] [b]Passenger Ships[/b] ([i]PassengerShipAI[/i])
+[*] [b]Cargo Airplanes[/b] ([i]CargoPlaneAI[/i])
+[*] [b]Passenger Airplanes[/b] ([i]PassengerPlaneAI[/i])
+[/list]
+[i](Note: Road vehicles and trucks already complete deliveries immediately without delay in vanilla, and are intentionally left untouched to maintain complete simulation fidelity.)[/i]
+
+[hr][/hr]
+
+[h1]🔄 COMPATIBILITY[/h1]
+Fully tested and compatible with the standard modern modding ecosystem:
+[list]
+[*] [b]Harmony 2.2+ (CitiesHarmony)[/b] (Required)
+[*] [b]TM:PE (Traffic Manager: President Edition)[/b] (Stable & Labs)
+[*] [b]Optimised Outside Connections[/b]
+[*] [b]Transfer Manager CE[/b]
+[*] [b]More Nodes/Segments (More Network Capacity Renew)[/b]
+[*] [b]81 Tiles 2[/b]
+[*] [b]Advanced Vehicle Options (AVO)[/b]
+[*] [b]More Vehicles / More CitizenUnits / More PathUnits[/b]
+[*] [b]Rebalanced Industries Revisited[/b]
+[/list]
+
+[hr][/hr]
+
+[h1]📦 REQUIREMENTS[/h1]
+[list]
+[*] [url=https://steamcommunity.com/workshop/filedetails/?id=2040656402]Harmony 2.2.2-0 (CitiesHarmony)[/url]
+[/list]
+
+[hr][/hr]
+
+[h1]SOURCE CODE & OPEN SOURCE[/h1]
+Fully open-source and actively maintained on GitHub:
+[url=https://github.com/NqocDuy1426/InstantBorderDespawn]https://github.com/NqocDuy1426/InstantBorderDespawn[/url]
+
+[hr][/hr]
+[i]Engineered with care for the Cities: Skylines community by NgocDuy.[/i]"
+	"changenote"		"v2.0.0 Initial Release: Safe Postfix wait acceleration for trains, ships, and planes at outside connections. 100% export revenue preserved, zero ghost wagons."
+}
